@@ -7,33 +7,29 @@ import type { Schema } from "@/amplify/data/resource";
 import "./../app/app.css";
 import "@aws-amplify/ui-react/styles.css";
 
-// Configure Amplify for local development
-// For now, using a basic configuration - the sandbox has CDK compatibility issues
-Amplify.configure({
-  API: {
-    GraphQL: {
-      endpoint: "http://localhost:54321/graphql",
-      region: "us-east-1",
-      defaultAuthMode: "apiKey",
-      apiKey: "da2-fakeApiId123456",
-    },
-  },
-  Auth: {
-    Cognito: {
-      userPoolId: "us-east-1_fakeUserPoolId",
-      userPoolClientId: "fakeUserPoolClientId",
-      region: "us-east-1",
-    },
-  },
-});
-
-// Create client - will work once backend is properly running
-let client: ReturnType<typeof generateClient<Schema>>;
+// Configure Amplify using the generated backend configuration (available after deployment)
+// For development, the configuration will be picked up from the sandbox
 try {
-  client = generateClient<Schema>();
+  const config = require("@/amplify/outputs.json");
+  Amplify.configure(config);
 } catch (error) {
-  console.warn("Backend not available, using mock client for UI testing");
-  // For UI testing without backend, we'll handle this gracefully
+  // outputs.json will only exist after deployment
+  console.log("Amplify outputs not yet available - this is normal during development");
+}
+
+// Create client lazily to avoid issues at build time
+let client: ReturnType<typeof generateClient<Schema>> | null = null;
+
+function getClient() {
+  if (!client) {
+    try {
+      client = generateClient<Schema>();
+    } catch (error) {
+      console.warn("Failed to initialize Amplify client:", error);
+      return null;
+    }
+  }
+  return client;
 }
 
 export default function App() {
@@ -41,10 +37,14 @@ export default function App() {
   const [backendAvailable, setBackendAvailable] = useState(false);
 
   function listTodos() {
-    if (!client) return;
+    const amplifyClient = getClient();
+    if (!amplifyClient) {
+      setBackendAvailable(false);
+      return;
+    }
 
     try {
-      client.models.Todo.observeQuery().subscribe({
+      amplifyClient.models.Todo.observeQuery().subscribe({
         next: (data) => {
           setTodos([...data.items]);
           setBackendAvailable(true);
@@ -65,7 +65,8 @@ export default function App() {
   }, []);
 
   function createTodo() {
-    if (!client) {
+    const amplifyClient = getClient();
+    if (!amplifyClient) {
       alert("Backend not available. Please start the Amplify sandbox first.");
       return;
     }
@@ -73,7 +74,7 @@ export default function App() {
     try {
       const content = window.prompt("Todo content");
       if (content) {
-        client.models.Todo.create({
+        amplifyClient.models.Todo.create({
           content: content,
         });
       }
